@@ -169,7 +169,7 @@ class CategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         # Soft delete ONLY the category
         category.soft_delete()
         
-        message = f"Category '{category.get_name_display()}' has been deactivated."
+        message = f"Category '{category.name}' has been deactivated."
         if subcategory_count > 0:
             message += f" {subcategory_count} subcategory(s) remain active and can still be used."
         
@@ -260,7 +260,7 @@ class CategoryOrganizationsView(generics.GenericAPIView):
         CategoryOrganization.objects.create(category=category, organization=organization)
         
         return Response(
-            {"message": f"Organization '{organization.name}' added to category '{category.get_name_display()}'"},
+            {"message": f"Organization '{organization.name}' added to category '{category.name}'"},
             status=status.HTTP_201_CREATED
         )
     
@@ -289,7 +289,7 @@ class CategoryOrganizationsView(generics.GenericAPIView):
         link.delete()  # Hard delete - it's just a relationship
         
         return Response(
-            {"message": f"Organization '{organization.name}' removed from category '{category.get_name_display()}'"},
+            {"message": f"Organization '{organization.name}' removed from category '{category.name}'"},
             status=status.HTTP_200_OK
         )
 

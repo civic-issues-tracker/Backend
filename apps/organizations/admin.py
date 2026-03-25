@@ -3,7 +3,6 @@ from .models import Organization, Category, SubCategory, CategoryOrganization
 
 
 class CategoryOrganizationInline(admin.TabularInline):
-    """Inline admin for Category-Organization relationships"""
     model = CategoryOrganization
     extra = 1
     autocomplete_fields = ['organization']
@@ -29,7 +28,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ['get_name_display', 'is_active', 'created_at']
+    list_display = ['name', 'is_active', 'created_at']  # ← Changed from 'get_name_display' to 'name'
     list_filter = ['is_active', 'created_at']
     search_fields = ['name']
     inlines = [CategoryOrganizationInline]
@@ -49,3 +48,4 @@ class CategoryOrganizationAdmin(admin.ModelAdmin):
     list_display = ['category', 'organization', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['category__name', 'organization__name']
+    

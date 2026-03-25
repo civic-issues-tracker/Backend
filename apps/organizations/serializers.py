@@ -44,7 +44,6 @@ class SubCategorySerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
-    """Serializer for Category model"""
     organizations = OrganizationSerializer(many=True, read_only=True)
     organization_ids = serializers.ListField(
         child=serializers.UUIDField(),
@@ -65,43 +64,12 @@ class CategorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_active']
 
-    @transaction.atomic
-    def create(self, validated_data):
-        """Create category and link to organizations"""
-        organization_ids = validated_data.pop('organization_ids', [])
-        category = Category.objects.create(**validated_data)
-        
-        for org_id in organization_ids:
-            CategoryOrganization.objects.create(
-                category=category,
-                organization_id=org_id
-            )
-        
-        return category
-
-    @transaction.atomic
-    def update(self, instance, validated_data):
-        """Update category and its organization links"""
-        organization_ids = validated_data.pop('organization_ids', None)
-        
-        # Update category fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        
-        # Update organizations if provided
-        if organization_ids is not None:
-            # Remove existing relations
-            instance.category_organizations.all().delete()
-            # Add new relations
-            for org_id in organization_ids:
-                CategoryOrganization.objects.create(
-                    category=instance,
-                    organization_id=org_id
-                )
-        
-        return instance
-
+    def validate_name(self, value):
+        """Ensure category name is unique (case-insensitive)"""
+        instance_id = self.instance.id if self.instance else None
+        if Category.objects.filter(name__iexact=value).exclude(id=instance_id).exists():
+            raise serializers.ValidationError(f"Category '{value}' already exists.")
+        return value.title()  
 
 class CategoryDetailSerializer(CategorySerializer):
     """Detailed Category serializer with additional statistics"""

@@ -28,27 +28,15 @@ class Organization(BaseModel):
 
 
 class Category(BaseModel):
-    """
-    Main issue category (Water, Fire, Electricity, Road Damage)
-    System Admin can create/update/delete categories
-    """
-    CATEGORY_CHOICES = [
-        ('water', 'Water'),
-        ('fire', 'Fire'),
-        ('electricity', 'Electricity'),
-        ('road_damage', 'Road Damage'),
-    ]
+    """Main issue category - System Admin can create ANY category"""
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=20, choices=CATEGORY_CHOICES, unique=True, db_index=True)
+    name = models.CharField(max_length=50, unique=True)  
     description = models.TextField(blank=True)
-    
-    # Many-to-Many relationship with Organization through CategoryOrganization
     organizations = models.ManyToManyField(
         Organization,
         through='CategoryOrganization',
-        related_name='categories',
-        through_fields=('category', 'organization')
+        related_name='categories'
     )
 
     class Meta:
@@ -60,9 +48,7 @@ class Category(BaseModel):
         ]
 
     def __str__(self):
-        return self.get_name_display() + (" (Inactive)" if not self.is_active else "")
-
-
+        return self.name + (" (Inactive)" if not self.is_active else "")
 class CategoryOrganization(BaseModel):
     """
     Junction table linking categories to organizations (Many-to-Many)
