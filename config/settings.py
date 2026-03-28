@@ -138,6 +138,11 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 DEFAULT_FROM_EMAIL = f"Civic Issues Tracker <{EMAIL_HOST_USER}>"
 
+# ========== SMS SETTINGS (Afro Message) ==========
+AFRO_MESSAGE_API_KEY = os.getenv('AFRO_MESSAGE_API_KEY')
+AFRO_MESSAGE_SENDER_ID = os.getenv('AFRO_MESSAGE_SENDER_ID', 'WHALE')
+AFRO_MESSAGE_API_URL = os.getenv('AFRO_MESSAGE_API_URL', 'https://api.afromessage.com/api/send')
+
 # ========== TELEGRAM SETTINGS ==========
 # ALL values come from .env - NO hardcoded values
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -147,11 +152,38 @@ TELEGRAM_BOT_USERNAME = os.getenv('TELEGRAM_BOT_USERNAME')
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 # ========== CACHE SETTINGS ==========
+# Cache configuration with Redis
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            #'PARSER_CLASS': 'redis._parsers.HiredisParser',
+            'CONNECTION_POOL_CLASS': 'redis.BlockingConnectionPool',
+            'CONNECTION_POOL_CLASS_KWARGS': {
+                'max_connections': 50,
+                'timeout': 20,
+            },
+            'MAX_CONNECTIONS': 1000,
+            'PICKLE_VERSION': -1,
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'IGNORE_EXCEPTIONS': True,
+        },
+        'KEY_PREFIX': 'civic_tracker',
+        'TIMEOUT': 300,  # Default timeout: 5 minutes
     }
 }
+
+# Session storage to use Redis for sessions)
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+
+# Redis connection for direct use
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+REDIS_DB = int(os.getenv('REDIS_DB', 1))
 
 # ========== SUPERUSER DEFAULTS ==========
 # ALL values come from .env - NO hardcoded values
@@ -159,3 +191,6 @@ SUPERUSER_EMAIL = os.getenv('SUPERUSER_EMAIL')
 SUPERUSER_PASSWORD = os.getenv('SUPERUSER_PASSWORD')
 SUPERUSER_NAME = os.getenv('SUPERUSER_NAME')
 SUPERUSER_PHONE = os.getenv('SUPERUSER_PHONE')
+
+# Admin creation secret (for first system admin)
+ADMIN_CREATION_SECRET = os.getenv('ADMIN_CREATION_SECRET')

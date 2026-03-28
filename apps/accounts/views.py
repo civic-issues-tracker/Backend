@@ -11,65 +11,221 @@ from .serializers import (
     ResidentRegistrationSerializer,
     LoginSerializer,
     UserSerializer,
-    VerifySerializer,
-    SetPasswordSerializer,
+    VerifyOTPSerializer,
+    ResendOTPSerializer,
     CreateOrgAdminSerializer,
     CompleteRegistrationSerializer,
+    SetPasswordSerializer,
+    SystemAdminRegistrationSerializer,  
 )
-from .models import Role, OrganizationAdmin
+from .models import Role, OrganizationAdmin, User
 from .utils import (
-    get_token_data, delete_token, send_password_setup_email,
-    generate_verification_token, store_token, generate_user_number,
-    handle_telegram_start_command, send_telegram_message,
-    send_telegram_verification_button
+    generate_user_number,
+    send_password_setup_email,
+    generate_verification_token,
+    store_token,
+    get_token_data,
+    delete_token,
 )
+from .otp_service import OTPService
 from apps.organizations.models import Organization
-from .models import User
 
 
-class ResidentRegisterView(generics.CreateAPIView):
+class ResidentRegisterView(generics.GenericAPIView):
     serializer_class = ResidentRegistrationSerializer
-    permission_classes = [AllowAny]
-
-
-class VerifyView(generics.GenericAPIView):
-    serializer_class = VerifySerializer
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        token = serializer.validated_data['token']
-        verification_type = serializer.validated_data['type']
+        validated_data = serializer.validated_data
+        verification_method = validated_data.pop('verification_method')
+        validated_data.pop('confirm_password')
         
-        token_data = get_token_data(token, verification_type)
+        # Check if user already exists in database
+        phone = validated_data.get('phone')
+        email = validated_data.get('email')
         
-        if not token_data:
+        if User.objects.filter(phone=phone).exists():
             return Response(
-                {"error": "Invalid or expired verification link"},
+                {"error": "A user with this phone number already exists"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        try:
-            user = User.objects.get(id=token_data['user_id'])
-        except User.DoesNotExist:
+        if email and User.objects.filter(email=email).exists():
             return Response(
-                {"error": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "A user with this email already exists"},
+                status=status.HTTP_400_BAD_REQUEST
             )
         
-        if verification_type == 'email':
-            user.email_verified = True
-        else:  # telegram
-            user.telegram_verified = True
+        # Check if there's already a pending registration for this contact
+        contact = validated_data.get('email', validated_data.get('phone'))
+        has_pending, existing_temp_id, pending_data = OTPService.check_existing_pending(contact)
         
-        user.save()
-        delete_token(token, verification_type)
+        if has_pending:
+            # If pending exists, resend OTP with existing temp_id
+            temp_id = existing_temp_id
+            otp_code = pending_data['otp_code']
+            
+            # Resend OTP
+            if verification_method == 'email':
+                success, message = OTPService.send_email_otp(
+                    validated_data['email'], 
+                    otp_code, 
+                    validated_data['full_name']
+                )
+            else:
+                success, message = OTPService.send_sms(
+                    validated_data['phone'], 
+                    otp_code
+                )
+            
+            if not success:
+                return Response(
+                    {"error": f"Failed to send OTP: {message}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            return Response({
+                "message": f"A pending registration exists. New OTP sent to your {verification_method}.",
+                "temp_id": temp_id,
+                "verification_method": verification_method,
+                "expires_in": 20
+            }, status=status.HTTP_200_OK)
+        
+        # Store registration data in cache with OTP
+        temp_id, otp_code = OTPService.store_pending_user(validated_data, verification_method)
+        
+        # Send OTP
+        if verification_method == 'email':
+            success, message = OTPService.send_email_otp(
+                validated_data['email'], 
+                otp_code, 
+                validated_data['full_name']
+            )
+        else:  # sms
+            success, message = OTPService.send_sms(
+                validated_data['phone'], 
+                otp_code
+            )
+        
+        if not success:
+            OTPService.delete_pending_user(temp_id)
+            return Response(
+                {"error": f"Failed to send {verification_method} OTP: {message}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         
         return Response({
-            "message": f"{verification_type.capitalize()} verified successfully!",
-            "user": UserSerializer(user).data
+            "message": f"OTP sent to your {verification_method}. Please verify to complete registration.",
+            "temp_id": temp_id,
+            "verification_method": verification_method,
+            "expires_in": 20
+        }, status=status.HTTP_201_CREATED)
+
+        
+class VerifyOTPView(generics.GenericAPIView):
+    """
+    Step 2: Verify OTP and create the actual user
+    """
+    serializer_class = VerifyOTPSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        temp_id = serializer.validated_data['temp_id']
+        otp_code = serializer.validated_data['otp_code']
+        
+        # Verify OTP and create user
+        success, message, user = OTPService.verify_otp_and_create_user(temp_id, otp_code)
+        
+        if not success:
+            return Response(
+                {"error": message},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            "message": message,
+            "user": UserSerializer(user).data,
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+        }, status=status.HTTP_201_CREATED)
+
+
+class ResendOTPView(generics.GenericAPIView):
+    """
+    Resend OTP for pending registration
+    """
+    serializer_class = ResendOTPSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        temp_id = serializer.validated_data['temp_id']
+        
+        # Get pending user data
+        pending_data = OTPService.get_pending_user(temp_id)
+        
+        if not pending_data:
+            return Response(
+                {"error": "Registration session expired. Please register again."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if too many resend attempts
+        resend_count = pending_data.get('resend_count', 0)
+        if resend_count >= 3:
+            OTPService.delete_pending_user(temp_id)
+            return Response(
+                {"error": "Too many resend attempts. Please register again."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate new OTP
+        new_otp = OTPService.generate_otp()
+        pending_data['otp_code'] = new_otp
+        pending_data['attempts'] = 0
+        pending_data['resend_count'] = resend_count + 1
+        
+        # Update cache
+        cache_key = f"pending_user_{temp_id}"
+        from django.core.cache import cache
+        cache.set(cache_key, pending_data, timeout=1200)
+        
+        # Resend OTP
+        registration_data = pending_data['registration_data']
+        method = pending_data['method']
+        
+        if method == 'email':
+            success, message = OTPService.send_email_otp(
+                registration_data['email'],
+                new_otp,
+                registration_data['full_name']
+            )
+        else:
+            success, message = OTPService.send_sms(
+                registration_data['phone'],
+                new_otp
+            )
+        
+        if not success:
+            return Response(
+                {"error": f"Failed to send OTP: {message}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        return Response({
+            "message": f"New OTP sent to your {method}",
+            "temp_id": temp_id
         })
 
 
@@ -120,6 +276,68 @@ class LogoutView(generics.GenericAPIView):
             )
 
 
+class CreateSystemAdminView(generics.GenericAPIView):
+    """
+    Create the initial system admin (only one allowed)
+    This endpoint can only be called once during initial setup
+    """
+    serializer_class = SystemAdminRegistrationSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        # Check if ANY superuser already exists (system admin)
+        from .models import User
+        
+        if User.objects.filter(is_superuser=True).exists():
+            return Response(
+                {
+                    "error": "System admin already exists. Only one system administrator is allowed in the system.",
+                    "message": "If you need additional administrators, create them as Organization Admins."
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        validated_data = serializer.validated_data
+        
+        with transaction.atomic():
+            from .models import Role, SystemAdmin
+            from .utils import generate_user_number
+            
+            role = Role.objects.get(name='system_admin')
+            user_number = generate_user_number()
+            
+            user = User.objects.create_user(
+                email=validated_data['email'],
+                password=validated_data['password'],
+                phone=validated_data['phone'],
+                full_name=validated_data['full_name'],
+                role=role,
+                user_number=user_number,
+                is_verified=True,
+                is_active=True,
+                email_verified=True,
+                is_staff=True,
+                is_superuser=True
+            )
+            
+            # Create system admin profile
+            SystemAdmin.objects.create(user=user)
+            
+            # Generate JWT tokens for immediate login
+            from rest_framework_simplejwt.tokens import RefreshToken
+            refresh = RefreshToken.for_user(user)
+            
+            return Response({
+                "message": "System admin created successfully! Only one system admin is allowed in the system.",
+                "user": UserSerializer(user).data,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+            }, status=status.HTTP_201_CREATED)
+        
+
 class CreateOrganizationAdminView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
@@ -154,13 +372,16 @@ class CreateOrganizationAdminView(generics.GenericAPIView):
             role = Role.objects.get(name='organization_admin')
             user_number = generate_user_number()
             
+            # Create user with is_verified=False initially
             user = User.objects.create_user(
                 email=email,
                 password=None,
-                phone='',
-                full_name='',
+                phone=None,
+                full_name='',  # Will be set during completion
                 role=role,
                 user_number=user_number,
+                is_verified=False,
+                is_active=False,  # Not active until password setup
                 email_verified=False
             )
             
@@ -170,7 +391,7 @@ class CreateOrganizationAdminView(generics.GenericAPIView):
             )
             
             token = generate_verification_token()
-            store_token(user.id, token, 'registration_complete', expiry_hours=168)
+            store_token(user.id, token, 'org_admin_setup', expiry_hours=168)  # 7 days
             send_password_setup_email(email, token, '', organization.name)
         
         return Response({
@@ -179,6 +400,7 @@ class CreateOrganizationAdminView(generics.GenericAPIView):
 
 
 class CompleteRegistrationView(generics.GenericAPIView):
+    """Complete registration for organization admin"""
     serializer_class = CompleteRegistrationSerializer
     permission_classes = [AllowAny]
 
@@ -190,7 +412,7 @@ class CompleteRegistrationView(generics.GenericAPIView):
         full_name = serializer.validated_data['full_name']
         password = serializer.validated_data['password']
         
-        token_data = get_token_data(token, 'registration_complete')
+        token_data = get_token_data(token, 'org_admin_setup')
         
         if not token_data:
             return Response(
@@ -208,10 +430,12 @@ class CompleteRegistrationView(generics.GenericAPIView):
         
         user.full_name = full_name
         user.set_password(password)
+        user.is_active = True
+        user.is_verified = True
         user.email_verified = True
         user.save()
         
-        delete_token(token, 'registration_complete')
+        delete_token(token, 'org_admin_setup')
         
         return Response(
             {"message": "Registration complete! You can now login."},
@@ -247,90 +471,21 @@ class SetPasswordView(generics.GenericAPIView):
             )
         
         user.set_password(password)
+        user.is_active = True
+        user.is_verified = True
         user.email_verified = True
         user.save()
         delete_token(token, 'password_setup')
         
         return Response({"message": "Password set successfully! You can now login."})
-
-
-# ========== TELEGRAM WEBHOOK WITH SECURITY ==========
-
-@csrf_exempt
-def telegram_webhook(request):
-    """
-    Handle incoming Telegram messages with security checks
-    Endpoint: POST /api/v1/auth/telegram-webhook/
-    """
-    print("\n" + "=" * 60)
-    print("📨 Telegram webhook received!")
-    print("=" * 60)
     
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            print(f"Data: {json.dumps(data, indent=2)[:500]}...")
-            
-            # Handle callback queries (button clicks)
-            callback_query = data.get('callback_query')
-            if callback_query:
-                return handle_telegram_callback(callback_query)
-            
-            # Handle regular messages
-            message = data.get('message', {})
-            chat_id = message.get('chat', {}).get('id')
-            text = message.get('text', '')
-            telegram_username = message.get('chat', {}).get('username', '')
-            
-            print(f"Chat ID: {chat_id}")
-            print(f"Username: {telegram_username}")
-            print(f"Message: {text}")
-            
-            # Check if user clicked a deep link with /start verify_XXX
-            if text.startswith('/start verify_'):
-                token = text.replace('/start verify_', '')
-                print(f"Token extracted: {token}")
-                
-                # Pass chat_id for security check
-                response_text = handle_telegram_start_command(token, chat_id, telegram_username)
-                print(f"Response: {response_text[:200]}...")
-                
-                # Send response back to user
-                send_telegram_message(chat_id, response_text)
-                print("✅ Response sent!")
-            
-            return JsonResponse({'ok': True})
-            
-        except Exception as e:
-            print(f"❌ Webhook error: {e}")
-            import traceback
-            traceback.print_exc()
-            return JsonResponse({'ok': False}, status=500)
-    
-    return HttpResponse('Method not allowed', status=405)
+class SystemAdminStatusView(generics.GenericAPIView):
+    """Check if system admin has been created"""
+    permission_classes = [AllowAny]
 
-
-def handle_telegram_callback(callback_query):
-    """
-    Handle inline keyboard button clicks
-    """
-    callback_data = callback_query.get('data', '')
-    chat_id = callback_query.get('message', {}).get('chat', {}).get('id')
-    telegram_username = callback_query.get('from', {}).get('username', '')
-    
-    print(f"📱 Callback received: {callback_data}")
-    print(f"Chat ID: {chat_id}")
-    print(f"Username: {telegram_username}")
-    
-    if callback_data.startswith('start_verify_'):
-        token = callback_data.replace('start_verify_', '')
-        print(f"Token: {token}")
-        
-        response_text = handle_telegram_start_command(token, chat_id, telegram_username)
-        send_telegram_message(chat_id, response_text)
-        
-        # Answer callback query to remove loading state
-        answer_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-        requests.post(answer_url, json={'callback_query_id': callback_query.get('id'), 'text': 'Processing...'})
-    
-    return JsonResponse({'ok': True})
+    def get(self, request):
+        has_admin = User.objects.filter(is_superuser=True).exists()
+        return Response({
+            "system_admin_exists": has_admin,
+            "message": "System admin exists" if has_admin else "No system admin found. Please create one using the registration endpoint."
+        })

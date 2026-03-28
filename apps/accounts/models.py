@@ -18,17 +18,19 @@ class Role(models.Model):
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email=None, password=None, **extra_fields):
-        """
-        Create a regular user.
-        Email is optional - can be empty for users who only use phone.
-        """
+    def create_user(self, email=None, phone=None, password=None, **extra_fields):
+        if not email and not phone:
+            raise ValueError('At least email or phone must be provided')
+        
         if email:
             email = self.normalize_email(email)
-        else:
-            email = None  # Empty string for users without email
         
-        user = self.model(email=email, **extra_fields)
+        # Prevent creating multiple superusers
+        if extra_fields.get('is_superuser', False):
+            if self.model.objects.filter(is_superuser=True).exists():
+                raise ValueError('A system admin already exists. Only one system admin is allowed.')
+        
+        user = self.model(email=email, phone=phone, **extra_fields)
         if password:
             user.set_password(password)
         user.save(using=self._db)
@@ -36,14 +38,20 @@ class UserManager(BaseUserManager):
 
     def create_superuser(self, email, password=None, **extra_fields):
         """
-        Create a superuser. Email is required for superusers.
+        Create a superuser. Only one superuser can exist.
         """
         if not email:
             raise ValueError('Superuser must have an email')
         
+        # Check if superuser already exists
+        if self.model.objects.filter(is_superuser=True).exists():
+            raise ValueError('A system admin already exists. Only one system administrator is allowed.')
+        
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
+        extra_fields.setdefault('is_verified', True)
+        extra_fields.setdefault('email_verified', True)
         
         role, _ = Role.objects.get_or_create(
             name='system_admin',
@@ -56,28 +64,27 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_number = models.CharField(max_length=20, unique=True, null=True, blank=True)
-    email = models.EmailField(unique=True, null=True, blank=True, default=None)
-    phone = models.CharField(max_length=20, unique=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
+    phone = models.CharField(max_length=20, unique=True, null=True, blank=True)
     full_name = models.CharField(max_length=100)
     role = models.ForeignKey(Role, on_delete=models.PROTECT)
     organization = models.ForeignKey('organizations.Organization', 
                                      on_delete=models.SET_NULL, 
                                      null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    is_verified = models.BooleanField(default=False)  # Overall verification status
     email_verified = models.BooleanField(default=False)
-    telegram_verified = models.BooleanField(default=False)
+    sms_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     last_login = models.DateTimeField(null=True, blank=True)
     is_staff = models.BooleanField(default=False)
-    telegram_chat_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
-    telegram_username = models.CharField(max_length=100, null=True, blank=True)
     
     objects = UserManager()
 
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['full_name', 'phone']
+    USERNAME_FIELD = 'email'  # Can be overridden in authentication
+    REQUIRED_FIELDS = ['full_name']
 
     class Meta:
         db_table = 'users'

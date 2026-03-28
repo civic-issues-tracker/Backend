@@ -371,3 +371,7 @@ class InactiveSubCategoriesListView(generics.ListAPIView):
     
     def get_queryset(self):
         return SubCategory.all_objects.filter(is_active=False)
+
+
+
+      

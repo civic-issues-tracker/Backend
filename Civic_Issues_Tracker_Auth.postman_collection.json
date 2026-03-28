@@ -1,0 +1,596 @@
+{
+  "info": {
+    "name": "Civic Issues Tracker - Authentication API",
+    "description": "Complete authentication flows for Residents and Organization Admins",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "2.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1/auth",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "temp_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. System Admin Registration (One-time Setup)",
+      "item": [
+        {
+          "name": "1.1 Create System Admin (First Time Only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('System admin created', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('access');",
+                  "    pm.expect(jsonData).to.have.property('refresh');",
+                  "    pm.collectionVariables.set('access_token', jsonData.access);",
+                  "    pm.collectionVariables.set('refresh_token', jsonData.refresh);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@civictracker.com\",\n  \"full_name\": \"System Administrator\",\n  \"phone\": \"+251900000000\",\n  \"password\": \"AdminPass123\",\n  \"confirm_password\": \"AdminPass123\",\n  \"admin_secret_key\": \"Y0urS3cr3tK3yF0rF1rstAdm1n!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/register/system-admin/",
+              "host": ["{{base_url}}"],
+              "path": ["register", "system-admin/"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Resident Registration (OTP Flow)",
+      "item": [
+        {
+          "name": "2.1 Register Resident with SMS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has temp_id', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('temp_id');",
+                  "    pm.collectionVariables.set('temp_id', jsonData.temp_id);",
+                  "    console.log('Temp ID saved:', jsonData.temp_id);",
+                  "    console.log('Check terminal for OTP code!');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+251906176300\",\n  \"full_name\": \"Test Resident\",\n  \"password\": \"TestPass123\",\n  \"confirm_password\": \"TestPass123\",\n  \"verification_method\": \"sms\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/register/resident/",
+              "host": ["{{base_url}}"],
+              "path": ["register", "resident/"]
+            }
+          }
+        },
+        {
+          "name": "2.2 Register Resident with Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has temp_id', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('temp_id');",
+                  "    pm.collectionVariables.set('temp_id', jsonData.temp_id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"resident@example.com\",\n  \"phone\": \"+251922222222\",\n  \"full_name\": \"Test Resident with Email\",\n  \"password\": \"TestPass123\",\n  \"confirm_password\": \"TestPass123\",\n  \"verification_method\": \"email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/register/resident/",
+              "host": ["{{base_url}}"],
+              "path": ["register", "resident/"]
+            }
+          }
+        },
+        {
+          "name": "2.3 Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 201', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "",
+                  "pm.test('User created and tokens received', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('access');",
+                  "    pm.expect(jsonData).to.have.property('refresh');",
+                  "    pm.expect(jsonData).to.have.property('user');",
+                  "    pm.collectionVariables.set('access_token', jsonData.access);",
+                  "    pm.collectionVariables.set('refresh_token', jsonData.refresh);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_id\": \"{{temp_id}}\",\n  \"otp_code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/verify-otp/",
+              "host": ["{{base_url}}"],
+              "path": ["verify-otp/"]
+            }
+          }
+        },
+        {
+          "name": "2.4 Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_id\": \"{{temp_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/resend-otp/",
+              "host": ["{{base_url}}"],
+              "path": ["resend-otp/"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Login & Profile",
+      "item": [
+        {
+          "name": "3.1 Login with Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Tokens received', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('access');",
+                  "    pm.expect(jsonData).to.have.property('refresh');",
+                  "    pm.collectionVariables.set('access_token', jsonData.access);",
+                  "    pm.collectionVariables.set('refresh_token', jsonData.refresh);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"resident@example.com\",\n  \"password\": \"TestPass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login/",
+              "host": ["{{base_url}}"],
+              "path": ["login/"]
+            }
+          }
+        },
+        {
+          "name": "3.2 Login with Phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+251906176300\",\n  \"password\": \"TestPass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login/",
+              "host": ["{{base_url}}"],
+              "path": ["login/"]
+            }
+          }
+        },
+        {
+          "name": "3.3 Login as System Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@civictracker.com\",\n  \"password\": \"AdminPass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login/",
+              "host": ["{{base_url}}"],
+              "path": ["login/"]
+            }
+          }
+        },
+        {
+          "name": "3.4 Get Profile (Authenticated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('User profile data', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('full_name');",
+                  "    pm.expect(jsonData).to.have.property('email');",
+                  "    pm.expect(jsonData).to.have.property('role_name');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["profile/"]
+            }
+          }
+        },
+        {
+          "name": "3.5 Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('New access token received', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('access');",
+                  "    pm.collectionVariables.set('access_token', jsonData.access);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/token/refresh/",
+              "host": ["{{base_url}}"],
+              "path": ["token", "refresh/"]
+            }
+          }
+        },
+        {
+          "name": "3.6 Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/logout/",
+              "host": ["{{base_url}}"],
+              "path": ["logout/"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Organization Admin Management",
+      "item": [
+        {
+          "name": "4.1 Create Organization Admin Invitation (System Admin Only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Invitation created', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.message).to.include('invitation sent');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"orgadmin@water.com\",\n  \"organization_id\": \"YOUR_ORGANIZATION_ID_HERE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/create-org-admin/",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "create-org-admin/"]
+            }
+          }
+        },
+        {
+          "name": "4.2 Complete Organization Admin Registration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Registration completed', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.message).to.include('Registration complete');",
+                  "    pm.expect(jsonData).to.have.property('access');",
+                  "    pm.collectionVariables.set('access_token', jsonData.access);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"INVITATION_TOKEN_FROM_EMAIL\",\n  \"full_name\": \"Jane Organization Admin\",\n  \"password\": \"SecurePass123\",\n  \"confirm_password\": \"SecurePass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/complete-registration/",
+              "host": ["{{base_url}}"],
+              "path": ["complete-registration/"]
+            }
+          }
+        },
+        {
+          "name": "4.3 Login as Organization Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"orgadmin@water.com\",\n  \"password\": \"SecurePass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login/",
+              "host": ["{{base_url}}"],
+              "path": ["login/"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
