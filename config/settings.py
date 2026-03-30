@@ -17,7 +17,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
+     'django.contrib.staticfiles',
     
     # Third party
     'rest_framework',
@@ -153,7 +153,7 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 # ========== CACHE SETTINGS ==========
 # Cache configuration with Redis
-CACHES = {
+"""CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
         'LOCATION': os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
@@ -174,7 +174,16 @@ CACHES = {
         'KEY_PREFIX': 'civic_tracker',
         'TIMEOUT': 300,  # Default timeout: 5 minutes
     }
+}"""
+
+# Cache - Use Database Cache (no Redis needed!)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache',  # This creates a table in the database
+    }
 }
+
 
 # Session storage to use Redis for sessions)
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
@@ -194,3 +203,12 @@ SUPERUSER_PHONE = os.getenv('SUPERUSER_PHONE')
 
 # Admin creation secret (for first system admin)
 ADMIN_CREATION_SECRET = os.getenv('ADMIN_CREATION_SECRET')
+
+# Static files (for PythonAnywhere)
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
