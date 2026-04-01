@@ -20,6 +20,12 @@ urlpatterns = [
     path('logout/', views.LogoutView.as_view(), name='logout'),
     path('profile/', views.ProfileView.as_view(), name='profile'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+
+
+    # Password Reset
+    path('forgot-password/', views.ForgotPasswordView.as_view(), name='forgot-password'),
+    path('reset-password/', views.ResetPasswordView.as_view(), name='reset-password'),
+    path('verify-reset-otp/', views.VerifyResetOTPView.as_view(), name='verify-reset-otp'),
     
     # Organization Admin (System Admin only)
     path('admin/create-org-admin/', views.CreateOrganizationAdminView.as_view(), name='create-org-admin'),

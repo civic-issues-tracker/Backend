@@ -8,8 +8,8 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('SECRET_KEY')
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+DEBUG =os.getenv('DEBUG', 'True') == 'True'
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,yeabsiraamare.pythonanywhere.com').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -17,12 +17,13 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-     'django.contrib.staticfiles',
+    'django.contrib.staticfiles',
     
     # Third party
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'rest_framework_simplejwt.token_blacklist',
     
     # Local apps
     'apps.common',
@@ -212,3 +213,55 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+
+# config/settings.py
+
+import os
+from pathlib import Path
+
+
+# ========== CORS SETTINGS ==========
+# Allow frontend origins
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",      # React default
+    "http://localhost:5173",      # Vite default (your friend's dev server)
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "https://yegnafix.vercel.app",  # Production frontend
+]
+
+# Allow credentials (cookies, authorization headers)
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow all methods (GET, POST, PUT, DELETE, etc.)
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Allow all headers
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# ========== CSRF SETTINGS ==========
+# Trusted origins for CSRF protection
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://yegnafix.vercel.app",
+]
+

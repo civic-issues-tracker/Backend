@@ -205,3 +205,58 @@ class SystemAdminRegistrationSerializer(serializers.Serializer):
             raise serializers.ValidationError({"admin_secret_key": "Invalid admin secret key"})
         
         return data
+    
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for requesting password reset
+    User provides either email OR phone
+    """
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        email = data.get('email')
+        phone = data.get('phone')
+        
+        # Must provide at least one contact method
+        if not email and not phone:
+            raise serializers.ValidationError(
+                "Either email or phone is required"
+            )
+        
+        # If both provided, use email (preferred)
+        if email and phone:
+            data['contact_method'] = 'email'
+            data['contact_value'] = email
+        elif email:
+            data['contact_method'] = 'email'
+            data['contact_value'] = email
+        else:
+            data['contact_method'] = 'sms'
+            data['contact_value'] = phone
+        
+        return data
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for resetting password with token
+    """
+    token = serializers.CharField(required=True)
+    password = serializers.CharField(write_only=True, min_length=8, required=True)
+    confirm_password = serializers.CharField(write_only=True, min_length=8, required=True)
+
+    def validate(self, data):
+        # Check passwords match
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError({"password": "Passwords do not match"})
+        
+        # Password strength validation
+        password = data['password']
+        if not any(char.isdigit() for char in password):
+            raise serializers.ValidationError(
+                {"password": "Password must contain at least one number"}
+            )
+        
+        return data

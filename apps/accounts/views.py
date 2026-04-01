@@ -6,6 +6,10 @@ from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse, HttpResponse
 import json
+from django.utils import timezone
+from datetime import timedelta
+from django.core.mail import send_mail
+from django.conf import settings
 
 from .serializers import (
     ResidentRegistrationSerializer,
@@ -17,6 +21,8 @@ from .serializers import (
     CompleteRegistrationSerializer,
     SetPasswordSerializer,
     SystemAdminRegistrationSerializer,  
+    ForgotPasswordSerializer,      
+    ResetPasswordSerializer,
 )
 from .models import Role, OrganizationAdmin, User
 from .utils import (
@@ -489,3 +495,388 @@ class SystemAdminStatusView(generics.GenericAPIView):
             "system_admin_exists": has_admin,
             "message": "System admin exists" if has_admin else "No system admin found. Please create one using the registration endpoint."
         })
+    
+
+
+
+class ForgotPasswordView(generics.GenericAPIView):
+    """
+    Step 1: Request password reset
+    User provides email or phone, system sends reset instructions
+    """
+    serializer_class = ForgotPasswordSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        validated_data = serializer.validated_data
+        contact_method = validated_data['contact_method']
+        contact_value = validated_data['contact_value']
+        
+        # Find user by email or phone
+        user = None
+        if contact_method == 'email':
+            try:
+                user = User.objects.get(email=contact_value)
+            except User.DoesNotExist:
+                pass
+        else:  # sms
+            try:
+                user = User.objects.get(phone=contact_value)
+            except User.DoesNotExist:
+                pass
+        
+        # IMPORTANT: Always return success even if user doesn't exist
+        # This prevents attackers from discovering valid emails/phones
+        if not user:
+            return Response({
+                "message": "If your account exists, you will receive reset instructions."
+            }, status=status.HTTP_200_OK)
+        
+        # Rate limiting: Prevent spam (3 requests per hour)
+        rate_limit_key = f"reset_rate_limit_{contact_value}"
+        from django.core.cache import cache
+        attempts = cache.get(rate_limit_key, 0)
+        
+        if attempts >= 3:
+            return Response({
+                "error": "Too many reset requests. Please try again later."
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
+        # Increment rate limit counter
+        cache.set(rate_limit_key, attempts + 1, timeout=3600)  # 1 hour window
+        
+        # Generate reset token (reuse your existing function)
+        from .utils import generate_verification_token, store_token
+        token = generate_verification_token()
+        
+        # Store token in cache with 1 hour expiry
+        store_token(user.id, token, 'password_reset', expiry_hours=1)
+        
+        # Send reset instructions based on contact method
+        if contact_method == 'email':
+            # Send reset link via email
+            reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+            
+            # Send email (reuse your email function pattern)
+            subject = 'Reset Your Password - Civic Issues Tracker'
+            html_message = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
+                    .button {{ display: inline-block; padding: 12px 24px; background-color: #4CAF50; 
+                              color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }}
+                    .footer {{ font-size: 12px; color: #777; text-align: center; margin-top: 20px; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Civic Issues Tracker</h1>
+                    </div>
+                    <div class="content">
+                        <p>Hello <strong>{user.full_name}</strong>,</p>
+                        <p>We received a request to reset your password.</p>
+                        <p>Click the button below to create a new password:</p>
+                        <p style="text-align: center;">
+                            <a href="{reset_link}" class="button">Reset Password</a>
+                        </p>
+                        <p>Or copy and paste this link:</p>
+                        <p>{reset_link}</p>
+                        <p>This link will expire in <strong>1 hour</strong>.</p>
+                        <p>If you didn't request this, please ignore this email.</p>
+                    </div>
+                    <div class="footer">
+                        <p>Civic Issues Tracker - Improving community services</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            plain_message = f"""
+            Hello {user.full_name},
+            
+            We received a request to reset your password.
+            
+            Click the link below to create a new password:
+            {reset_link}
+            
+            This link will expire in 1 hour.
+            
+            If you didn't request this, please ignore this email.
+            
+            Civic Issues Tracker Team
+            """
+            
+            try:
+                send_mail(
+                    subject,
+                    plain_message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [contact_value],
+                    fail_silently=False,
+                    html_message=html_message
+                )
+                print(f"✅ Password reset email sent to {contact_value}")
+            except Exception as e:
+                print(f"❌ Email failed: {e}")
+                # Still return success to user (security)
+                
+        else:  # sms
+            # Send 6-digit OTP via SMS
+            from .otp_service import OTPService
+            otp_code = OTPService.generate_otp()
+            
+            # Update token data with OTP (instead of link)
+            cache_key = f"password_reset_{token}"
+            token_data = {
+                'user_id': str(user.id),
+                'type': 'password_reset',
+                'otp_code': otp_code,
+                'attempts': 0,
+                'expires_at': timezone.now() + timedelta(hours=1)
+            }
+            cache.set(cache_key, token_data, timeout=3600)
+            
+            # Send SMS with OTP
+            success, message = OTPService.send_sms(contact_value, otp_code)
+            if not success:
+                print(f"❌ SMS failed: {message}")
+        
+        return Response({
+            "message": "If your account exists, you will receive reset instructions."
+        }, status=status.HTTP_200_OK)
+    
+  
+    serializer_class = ForgotPasswordSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from django.core.cache import cache
+        from django.core.mail import send_mail
+        from django.utils import timezone
+        from datetime import timedelta
+        from .otp_service import OTPService
+        from .utils import generate_verification_token, store_token
+        
+        print("=" * 60)
+        print("FORGOT PASSWORD REQUEST")
+        print("=" * 60)
+        
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        validated_data = serializer.validated_data
+        contact_method = validated_data['contact_method']
+        contact_value = validated_data['contact_value']
+        
+        print(f"Contact method: {contact_method}")
+        print(f"Contact value: {contact_value}")
+        
+        # Find user
+        user = None
+        if contact_method == 'email':
+            try:
+                user = User.objects.get(email=contact_value)
+                print(f"✅ Found user by email: {user.email}")
+            except User.DoesNotExist:
+                print(f"❌ No user found for email: {contact_value}")
+                pass
+        else:
+            try:
+                user = User.objects.get(phone=contact_value)
+                print(f"✅ Found user by phone: {user.phone}")
+            except User.DoesNotExist:
+                print(f"❌ No user found for phone: {contact_value}")
+                pass
+        
+        if not user:
+            print("User not found - returning success message")
+            return Response({
+                "message": "If your account exists, you will receive reset instructions."
+            }, status=status.HTTP_200_OK)
+        
+        # Rate limiting
+        rate_limit_key = f"reset_rate_limit_{contact_value}"
+        attempts = cache.get(rate_limit_key, 0)
+        print(f"Rate limit attempts: {attempts}")
+        
+        if attempts >= 3:
+            print("Rate limit exceeded")
+            return Response({
+                "error": "Too many reset requests. Please try again later."
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
+        cache.set(rate_limit_key, attempts + 1, timeout=3600)
+        print(f"Rate limit incremented to {attempts + 1}")
+        
+        # Generate token
+        token = generate_verification_token()
+        print(f"🔑 GENERATED TOKEN: {token}")
+        
+        # Store token
+        store_token(user.id, token, 'password_reset', expiry_hours=1)
+        print(f"✅ Token stored with key: password_reset_{token}")
+        
+        # Send instructions
+        if contact_method == 'email':
+            # Email flow...
+            pass
+        else:  # SMS
+            otp_code = OTPService.generate_otp()
+            print(f"📱 GENERATED OTP: {otp_code}")
+            
+            # Update token with OTP
+            cache_key = f"password_reset_{token}"
+            token_data = cache.get(cache_key)
+            if token_data:
+                token_data['otp_code'] = otp_code
+                token_data['attempts'] = 0
+                cache.set(cache_key, token_data, timeout=3600)
+                print(f"✅ OTP added to token data")
+            
+            # Send SMS
+            success, message = OTPService.send_sms(contact_value, otp_code)
+            if success:
+                print(f"✅ SMS sent to {contact_value}")
+            else:
+                print(f"❌ SMS failed: {message}")
+        
+        print("=" * 60)
+        print("RETURNING SUCCESS RESPONSE")
+        print("=" * 60)
+        
+        return Response({
+            "message": "If your account exists, you will receive reset instructions."
+        }, status=status.HTTP_200_OK)
+
+
+class ResetPasswordView(generics.GenericAPIView):
+    """
+    Step 2: Execute password reset with token
+    User provides token and new password
+    """
+    serializer_class = ResetPasswordSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        token = serializer.validated_data['token']
+        new_password = serializer.validated_data['password']
+        
+        # Get token data from cache
+        from .utils import get_token_data
+        token_data = get_token_data(token, 'password_reset')
+        
+        if not token_data:
+            return Response({
+                "error": "Invalid or expired reset token. Please request a new one."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if this is an OTP-based reset (SMS)
+        if 'otp_code' in token_data:
+            # For SMS flow, we need to verify OTP separately
+            # The frontend should send the OTP as part of the request
+            # For now, we'll handle it differently
+            return Response({
+                "error": "Please verify your code first."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get user
+        try:
+            user = User.objects.get(id=token_data['user_id'])
+        except User.DoesNotExist:
+            return Response({
+                "error": "User not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Update password
+        user.set_password(new_password)
+        user.save()
+        
+        # Delete token to prevent reuse
+        from .utils import delete_token
+        delete_token(token, 'password_reset')
+        
+        # Optional: Blacklist all user's refresh tokens (force re-login)
+        from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+        OutstandingToken.objects.filter(user=user).delete()
+        
+        return Response({
+            "message": "Password reset successful. You can now login with your new password."
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyResetOTPView(generics.GenericAPIView):
+    """
+    For SMS-based password reset: Verify OTP then reset password
+    """
+    serializer_class = VerifyOTPSerializer  # Reuse existing
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        temp_id = request.data.get('temp_id')
+        otp_code = request.data.get('otp_code')
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+        
+        # Get token data from cache
+        from .utils import get_token_data
+        token_data = get_token_data(temp_id, 'password_reset')
+        
+        if not token_data:
+            return Response({
+                "error": "Invalid or expired reset session."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Verify OTP
+        if token_data.get('otp_code') != otp_code:
+            # Increment attempts
+            attempts = token_data.get('attempts', 0) + 1
+            token_data['attempts'] = attempts
+            cache_key = f"password_reset_{temp_id}"
+            cache.set(cache_key, token_data, timeout=3600)
+            
+            if attempts >= 3:
+                delete_token(temp_id, 'password_reset')
+                return Response({
+                    "error": "Too many failed attempts. Please request a new reset."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            return Response({
+                "error": f"Invalid code. {3 - attempts} attempts remaining."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate passwords
+        if new_password != confirm_password:
+            return Response({
+                "error": "Passwords do not match."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get user
+        try:
+            user = User.objects.get(id=token_data['user_id'])
+        except User.DoesNotExist:
+            return Response({
+                "error": "User not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Update password
+        user.set_password(new_password)
+        user.save()
+        
+        # Delete token
+        delete_token(temp_id, 'password_reset')
+        
+        return Response({
+            "message": "Password reset successful. You can now login."
+        }, status=status.HTTP_200_OK)
